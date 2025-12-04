@@ -1,0 +1,1589 @@
+library(dplyr)
+library(stringr)
+library(biomaRt)
+
+library(tibble)
+library(tximport)
+library(tidyverse)
+library(fs)
+library(here)
+
+
+# Install biomaRt if you haven't already
+if (!requireNamespace("biomaRt", quietly = TRUE)) {
+  install.packages("biomaRt")  # For CRAN version
+  # or use Bioconductor for the latest version:
+  # if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+  # BiocManager::install("biomaRt")
+}
+
+# Load the package
+library(biomaRt)
+
+# Connect to the human Ensembl mart
+mart <- useMart(
+  "ENSEMBL_MART_ENSEMBL",
+  dataset = "hsapiens_gene_ensembl"
+)
+
+# Get transcript-to-gene mapping
+t2g <- getBM(
+  attributes = c(
+    "ensembl_transcript_id",
+    "ensembl_gene_id",
+    "external_gene_name"
+  ),
+  mart = mart
+) %>%
+  as_tibble()
+
+# Map systematic IDs to common gene names
+gene_name_map <- t2g %>%
+  dplyr::select(-ensembl_transcript_id) %>%
+  unique() %>%
+  mutate(external_gene_name = ifelse(
+    external_gene_name == "", ensembl_gene_id, external_gene_name
+  ))
+
+
+# Load metadata
+metadata <- tibble(
+  salmon_dirs = fs::dir_ls(
+    here("data/block-rna/differentiation_salmonouts"),
+    recurse = TRUE,
+    glob = "*quant.sf"
+  )
+) %>%
+  mutate(sample_id = fs::path_file(fs::path_dir(salmon_dirs))) %>%
+  filter(str_starts(sample_id, "DIV")) %>%
+  separate_wider_delim(
+    col = sample_id,
+    delim = ".",
+    names = c("timepoint", "rep"),
+    too_few = "align_start",
+    cols_remove = FALSE
+  ) %>%
+  mutate(rep = str_remove(rep, "Rep")) %>%
+  column_to_rownames("sample_id")
+
+# Add sample_id back
+metadata$sample_id <- rownames(metadata)
+
+# Keep only desired timepoints
+metadata <- metadata %>%
+  filter(timepoint %in% c("DIV0", "DIV7"))
+
+# Prepare salmon directories vector for tximport
+salmdir <- metadata$salmon_dirs
+names(salmdir) <- metadata$sample_id
+
+# Make tx2gene table compatible with tximport
+# tximport expects columns: transcript (tx), gene (gene)
+tx2gene <- gene_name_map %>%
+  rename(tx = ensembl_transcript_id, gene = external_gene_name)
+
+# Import with tximport
+txi <- tximport(
+  files = salmdir,
+  type = "salmon",
+  tx2gene = tx2gene,
+  dropInfReps = TRUE,
+  countsFromAbundance = "lengthScaledTPM"
+)
+
+
+
+
+
+library(GEOquery)
+library(dplyr)
+library(stringr)
+
+# Load GEO dataset
+gse <- getGEO("GSE175809", GSEMatrix = TRUE)[[1]]
+
+pdata <- pData(gse)
+
+# Define the GSMs you care about
+selected_gsms <- c(
+  "GSM5348316", "GSM5348317", "GSM5348318", 
+  "GSM5348319", "GSM5348310", "GSM5348311"
+)
+
+# Subset pdata and add TGFb info
+TGFb_data <- pdata %>%
+  filter(geo_accession %in% selected_gsms) %>%
+  mutate(
+    TGFb_treatment = if_else(str_detect(title, "TGFB"), "TGFb", "No_TGFb")
+  ) %>%
+  dplyr::select(
+    geo_accession, title, cell_line = `cell line:ch1`,
+    condition = `condition:ch1`, stage = `developmental stage:ch1`,
+    TGFb_treatment
+  )
+
+TGFb_data
+
+
+
+
+
+
+
+
+
+
+
+
+# ---- Load GEO dataset ----
+gse <- getGEO("GSE175809", GSEMatrix = TRUE)[[1]]
+
+pdata <- pData(gse)
+
+
+TGFb_data <- pdata %>%
+  mutate(
+    TGFb_treatment = if_else(str_detect(title, "TGFB"), "TGFb", "No_TGFb")
+  )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(tidyverse)
+library(DESeq2)
+library(tidyverse)
+
+
+library(biomaRt)
+library(dplyr)
+library(tibble)
+
+mart <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+
+gene_name_map <- getBM(
+  attributes = c("ensembl_gene_id", "external_gene_name"),
+  filters = "ensembl_gene_id",
+  values = rownames(count_matrix_filtered),
+  mart = mart
+) %>%
+  as_tibble()
+
+
+
+file_path <- "/Users/raileymikeska/Downloads/GSE175809_hiNCC_featureCounts.txt"
+
+# Read the counts, skipping the first comment line
+counts_raw <- read.delim(
+  file_path,
+  comment.char = "#",      # skip the first line starting with '#'
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+# Keep only the count columns (after 'Length')
+count_matrix <- counts_raw %>%
+  dplyr::select(-(Chr:Length)) %>%       # remove metadata columns
+  column_to_rownames("Geneid")    # set gene IDs as rownames
+
+# Fix sample column names (strip out "../bam/" and "_hg38.bam")
+colnames(count_matrix) <- colnames(count_matrix) %>%
+  str_replace_all("../bam/", "") %>%
+  str_replace_all("_hg38.bam", "")
+
+# Check
+head(count_matrix)
+
+
+
+library(tibble)
+library(dplyr)
+library(stringr)
+
+# Extract sample names from count matrix
+sample_names <- colnames(count_matrix)
+
+# Create a metadata table for DESeq2
+metadata <- tibble(
+  sample_id = sample_names
+) %>%
+  mutate(
+    TGFb_treatment = if_else(str_detect(sample_id, "TGFB"), "TGFb", "No_TGFb"),
+    Wnt_condition = if_else(str_detect(sample_id, "highWNT"), "highWnt", "lowWnt"),
+    Induction = if_else(str_detect(sample_id, "NoInd"), "NoInduction", "hiNCC_Day5")
+  )
+
+# Check
+metadata
+
+
+metadata <- metadata %>%
+  mutate(
+    TGFb_treatment = factor(TGFb_treatment),
+    Wnt_condition  = factor(Wnt_condition),
+    Induction      = factor(Induction)
+  )
+
+
+
+# Examine distribution of counts across all genes
+hist(log2(1 + rowSums(count_matrix)), breaks = 40,
+     main = "Distribution of log2 total counts per gene",
+     xlab = "log2(1 + total counts)")
+
+# Decide a cutoff and keep genes above it
+keep_genes <- rownames(count_matrix)[log2(1 + rowSums(count_matrix)) > 4.5]
+
+# Filter count_matrix
+count_matrix_filtered <- count_matrix[keep_genes, ]
+
+# Check
+dim(count_matrix_filtered)
+head(count_matrix_filtered)
+
+
+library(DESeq2)
+
+dds <- DESeqDataSetFromMatrix(
+  countData = count_matrix_filtered,
+  colData = metadata,
+  design = ~ TGFb_treatment + Wnt_condition
+)
+
+# Run DESeq
+dds <- DESeq(dds)
+
+# Inspect results
+dds
+
+library(dplyr)
+library(tibble)
+
+diff_tgf <-
+  results(
+    dds,
+    contrast = c("TGFb_treatment", "TGFb", "No_TGFb")
+  ) %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "gene") %>%   # rownames ARE gene symbols
+  as_tibble() %>%
+  dplyr::select(-c(baseMean, lfcSE, stat, pvalue))
+
+
+# number of upregulated genes
+nrow(filter(diff_tgf, padj < 0.01 & log2FoldChange > 0))
+
+# number of downregulated genes
+nrow(filter(diff_tgf, padj < 0.01 & log2FoldChange < 0))
+
+
+
+# meets the FDR cutoff
+diff_sig <-
+  mutate(
+    diff_tgf,
+    sig = case_when(
+      padj < 0.01 ~ "yes",
+      .default = "no"
+    )
+  ) |>
+  # if a gene did not meet expression cutoffs that DESeq2 automatically does, it gets a pvalue of NA
+  drop_na()
+
+library(ggrepel)  # for non-overlapping labels
+
+library(ggplot2)
+library(ggrepel)
+library(cowplot)
+library(dplyr)
+
+
+# Your tubulin genes
+tubulin_genes <- c(
+  "TUBB1", "TUBB2A", "TUBB2B", "TUBB3", "TUBB4", "TUBB5", "TUBB6",
+  "TUBA1A", "TUBA1B", "TUBA1C", "TUBA3A", "TUBA4A", "TUBA8"
+)
+
+# Convert both to uppercase
+diff_sig <- diff_sig %>% mutate(gene_upper = toupper(gene))
+tubulin_genes_upper <- toupper(tubulin_genes)
+
+# Volcano plot
+ggplot(diff_sig, aes(x = log2FoldChange, y = -log10(padj), color = sig)) +
+  geom_point(alpha = 0.3) +
+  geom_text_repel(
+    data = subset(diff_sig, grepl("TUBB|TUBA", gene, ignore.case = TRUE)),
+    aes(label = gene),
+    size = 3,
+    segment.alpha = 0.5,
+    max.overlaps = 50
+  ) +
+  labs(
+    x = "log2 Fold Change (TGFβ / No TGFβ)",
+    y = "-log10(FDR)"
+  ) +
+  scale_color_manual(
+    values = c("black", "red"),
+    labels = c("NS", "FDR < 0.01"),
+    name = ""
+  ) +
+  theme_cowplot() +
+  theme(legend.position = "top")
+
+
+
+
+
+
+
+
+
+
+library(DESeq2)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(cowplot)
+
+# -------------------------------
+# 1. Get results with ≥3-fold change
+# -------------------------------
+diff_lfc_tgf <-
+  results(
+    dds,
+    contrast = c("TGFb_treatment", "TGFb", "No_TGFb"),
+    lfcThreshold = log2(2)   # 2-fold change
+  ) %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "gene") %>%  # rownames are already gene symbols
+  as_tibble() %>%
+  dplyr::select(-c(baseMean, lfcSE, stat, pvalue))  # remove unnecessary DESeq2 columns
+
+# -------------------------------
+# 2. Flag significant genes (FDR < 0.01)
+# -------------------------------
+diff_lfc_tgf <- diff_lfc_tgf %>%
+  mutate(
+    sig = case_when(
+      padj < 0.01 ~ "yes",
+      TRUE ~ "no"
+    )
+  ) %>%
+  drop_na()  # remove genes with NA p-values
+
+# -------------------------------
+# 3. Count significant genes
+# -------------------------------
+# Up in TGFβ-treated
+n_up <- sum(diff_lfc_tgf$padj < 0.01 & diff_lfc_tgf$log2FoldChange > 0)
+# Down in TGFβ-treated
+n_down <- sum(diff_lfc_tgf$padj < 0.01 & diff_lfc_tgf$log2FoldChange < 0)
+
+n_up
+n_down
+
+# -------------------------------
+# 4. Volcano plot
+# -------------------------------
+ggplot(
+  diff_lfc_tgf,
+  aes(
+    x = log2FoldChange,
+    y = -log10(padj),
+    color = sig
+  )
+) +
+  geom_point(alpha = 0.2) +
+  labs(
+    x = "TGFβ expression / No TGFβ expression, log2",
+    y = "-log10(FDR)"
+  ) +
+  scale_color_manual(
+    values = c("black", "red"),
+    labels = c("NS", "FDR < 0.01"),
+    name = ""
+  ) +
+  theme_cowplot()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+diff_lfc_tgf <- results(dds, contrast = c("TGFb_treatment", "TGFb", "No_TGFb")) %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  as_tibble() %>%
+  select(-c(baseMean, lfcSE, stat, pvalue)) %>%
+  drop_na() %>%
+  mutate(
+    sig = case_when(
+      padj < 0.01 & abs(log2FoldChange) >= log2(2) ~ "yes",
+      TRUE ~ "no"
+    )
+  )
+
+
+
+install.packages("gt")
+
+
+library(dplyr)
+library(gt)
+
+# -------------------------------
+# 1. Flag significant genes (FDR < 0.01)
+# -------------------------------
+diff_lfc_sig <- diff_lfc %>%
+  mutate(
+    sig = case_when(
+      padj < 0.01 ~ "yes",
+      TRUE ~ "no"
+    )
+  ) %>%
+  drop_na()  # remove genes with NA p-values
+
+
+library(ggrepel)
+
+ggplot(diff_lfc_sig, aes(
+  x = log2FoldChange,
+  y = -log10(padj),
+  color = sig
+)) +
+  geom_point(alpha = 0.2) +
+  # Add labels only for significant genes
+  geom_text_repel(
+    data = subset(diff_lfc_sig, sig == "yes"),
+    aes(label = gene),
+    size = 3,
+    max.overlaps = 20
+  ) +
+  labs(
+    x = "DIV7 expression / DIV0 expression, log2",
+    y = "-log10(FDR)"
+  ) +
+  scale_color_manual(
+    values = c("black", "red"),
+    labels = c("NS", "FDR < 0.01"),
+    name = ""
+  ) +
+  theme_cowplot()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(DESeq2)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(ggrepel)
+library(cowplot)
+
+# ------------------------------
+# Subset metadata for high and low Wnt
+# ------------------------------
+metadata_high <- metadata %>% 
+  filter(Wnt_condition == "highWnt") %>%
+  filter(!str_detect(sample_id, "_SB4_"))
+
+metadata_low <- metadata %>% 
+  filter(Wnt_condition == "lowWnt") %>%
+  filter(!str_detect(sample_id, "_SB4_"))
+
+
+# Subset count matrix to match columns
+count_high <- count_matrix_filtered[, colnames(count_matrix_filtered) %in% metadata_high$sample_id]
+count_low  <- count_matrix_filtered[, colnames(count_matrix_filtered) %in% metadata_low$sample_id]
+
+
+
+metadata_high
+metadata_low
+colnames(count_high)
+colnames(count_low)
+
+
+
+# ------------------------------
+# Run DESeq2 for high Wnt cells
+# ------------------------------
+dds_high <- DESeqDataSetFromMatrix(
+  countData = count_high,
+  colData = metadata_high,
+  design = ~ TGFb_treatment
+)
+dds_high <- DESeq(dds_high)
+res_high <- results(dds_high, contrast = c("TGFb_treatment", "TGFb", "No_TGFb")) %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "gene") %>%
+  as_tibble() %>%
+  mutate(sig = if_else(padj < 0.01, "yes", "no"))
+
+# ------------------------------
+# Run DESeq2 for low Wnt cells
+# ------------------------------
+dds_low <- DESeqDataSetFromMatrix(
+  countData = count_low,
+  colData = metadata_low,
+  design = ~ TGFb_treatment
+)
+dds_low <- DESeq(dds_low)
+res_low <- results(dds_low, contrast = c("TGFb_treatment", "TGFb", "No_TGFb")) %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "gene") %>%
+  as_tibble() %>%
+  mutate(sig = if_else(padj < 0.01, "yes", "no"))
+
+# ------------------------------
+# Volcano plot function
+# ------------------------------
+# Volcano plot function with highlighted tubulin genes (colored by sig)
+plot_volcano <- function(diff_df, title) {
+  
+  # Identify tubulin genes
+  tub_genes <- subset(diff_df, grepl("TUBB|TUBA", gene, ignore.case = TRUE))
+  other_genes <- subset(diff_df, !grepl("TUBB|TUBA", gene, ignore.case = TRUE))
+  
+  ggplot() +
+    # Plot all non-tubulin genes faintly
+    geom_point(data = other_genes, 
+               aes(x = log2FoldChange, y = -log10(padj), color = sig), 
+               alpha = 0.2, size = 1.5) +
+    
+    # Plot tubulin genes bigger, outlined
+    geom_point(data = tub_genes, 
+               aes(x = log2FoldChange, y = -log10(padj), color = sig), 
+               shape = 21, size = 5, stroke = 1.2, fill = "white") +
+    
+    # Add labels for tubulin genes
+    geom_text_repel(data = tub_genes,
+                    aes(x = log2FoldChange, y = -log10(padj), label = gene),
+                    size = 6, segment.alpha = 0.5, max.overlaps = 50) +
+    
+    labs(
+      x = "log2 Fold Change (TGFβ / No TGFβ)",
+      y = "-log10(FDR)",
+      title = title
+    ) +
+    
+    scale_color_manual(values = c("black", "red"), labels = c("NS", "FDR < 0.01"), name = "") +
+    
+    theme_cowplot() +
+    theme(legend.position = "top")
+}
+
+# Example usage
+volcano_high <- plot_volcano(res_high, "High Wnt cells")
+volcano_low  <- plot_volcano(res_low, "Low Wnt cells")
+
+cowplot::plot_grid(volcano_high, volcano_low, ncol = 2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(dplyr)
+library(stringr)
+library(tibble)
+library(DESeq2)
+
+
+file_path <- "/Users/raileymikeska/Downloads/GSE175809_hiNCC_featureCounts.txt"
+
+counts_raw <- read.delim(
+  file_path,
+  comment.char = "#",
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+
+count_matrix <- counts_raw %>%
+  dplyr::select(-(Chr:Length)) %>%
+  column_to_rownames("Geneid")
+
+colnames(count_matrix) <- colnames(count_matrix) %>%
+  str_replace("../bam/", "") %>%
+  str_replace("_hg38.bam", "")
+
+
+keep_cols <- c(
+  "RNA_highWNT_1", "RNA_highWNT_2",
+  "RNA_highWNT_SB4_1", "RNA_highWNT_SB4_2",
+  "RNA_highWNT_TGFB_1", "RNA_highWNT_TGFB_2",
+  "RNA_lowWNT_1", "RNA_lowWNT_2",
+  "RNA_lowWNT_SB4_1", "RNA_lowWNT_SB4_2",
+  "RNA_lowWNT_TGFB_1", "RNA_lowWNT_TGFB_2",
+  "RNA_NoInd_1", "RNA_NoInd_2"
+)
+
+count_matrix <- count_matrix[, keep_cols]
+
+
+
+col_data <- data.frame(
+  sample = colnames(count_matrix),
+  condition = c(
+    "highWNT", "highWNT",
+    "highWNT_SB4", "highWNT_SB4",
+    "highWNT_TGFB", "highWNT_TGFB",
+    "lowWNT", "lowWNT",
+    "lowWNT_SB4", "lowWNT_SB4",
+    "lowWNT_TGFB", "lowWNT_TGFB",
+    "NoInd", "NoInd"
+  )
+)
+
+rownames(col_data) <- col_data$sample
+
+
+
+dds <- DESeqDataSetFromMatrix(
+  countData = count_matrix,
+  colData = col_data,
+  design = ~ condition
+)
+
+dds <- dds[rowSums(counts(dds)) > 10, ]
+
+dds <- DESeq(dds)
+
+
+res <- results(dds, contrast = c("condition", "highWNT", "lowWNT"))
+
+head(res)
+
+# Show top genes by adjusted p-value
+head(res[order(res$padj), ])
+
+
+summary(res)
+
+res$gene <- rownames(res)
+res_df <- as.data.frame(res)
+
+
+library(ggplot2)
+
+res_df <- res_df %>%
+  mutate(
+    sig = ifelse(padj < 0.05 & abs(log2FoldChange) > 1, "yes", "no")
+  )
+
+ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = sig)) +
+  geom_point(alpha = 0.5) +
+  scale_color_manual(values = c("no" = "grey", "yes" = "red")) +
+  theme_minimal() +
+  xlab("Log2 Fold Change") +
+  ylab("-log10(adjusted p-value)") +
+  ggtitle("Volcano plot: highWNT vs lowWNT")
+
+
+
+
+
+
+
+
+
+
+# ---------------------------------------
+# Extra contrasts for NoInd comparisons
+# ---------------------------------------
+
+# NoInd vs lowWNT
+res_noind_vs_low <- results(dds, contrast = c("condition", "NoInd", "lowWNT"))
+res_noind_vs_low$gene <- rownames(res_noind_vs_low)
+res_noind_vs_low_df <- as.data.frame(res_noind_vs_low) %>%
+  mutate(sig = ifelse(padj < 0.05 & abs(log2FoldChange) > 1, "yes", "no"))
+
+# NoInd vs highWNT
+res_noind_vs_high <- results(dds, contrast = c("condition", "NoInd", "highWNT"))
+res_noind_vs_high$gene <- rownames(res_noind_vs_high)
+res_noind_vs_high_df <- as.data.frame(res_noind_vs_high) %>%
+  mutate(sig = ifelse(padj < 0.05 & abs(log2FoldChange) > 1, "yes", "no"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(ggrepel)
+
+# Define tubulin genes (upper case to match rownames)
+tubulin_genes <- toupper(c(
+  "TUBB1", "TUBB2A", "TUBB2B", "TUBB3", "TUBB4", "TUBB5", "TUBB6",
+  "TUBA1A", "TUBA1B", "TUBA1C", "TUBA4A", "TUBA8"
+))
+
+# ---- NoInd vs lowWNT ----
+ggplot() +
+  # All non-tubulin points
+  geom_point(
+    data = subset(res_noind_vs_low_df, !(gene %in% tubulin_genes)),
+    aes(x = log2FoldChange, y = -log10(padj), color = sig),
+    alpha = 0.5
+  ) +
+  scale_color_manual(values = c("no" = "grey", "yes" = "red")) +
+  # Tubulin points in black
+  geom_point(
+    data = subset(res_noind_vs_low_df, gene %in% tubulin_genes),
+    aes(x = log2FoldChange, y = -log10(padj)),
+    color = "black",
+    size = 2
+  ) +
+  # Labels for tubulin genes
+  geom_text_repel(
+    data = subset(res_noind_vs_low_df, gene %in% tubulin_genes),
+    aes(x = log2FoldChange, y = -log10(padj), label = gene),
+    size = 3,
+    box.padding = 0.3,
+    point.padding = 0.5,
+    max.overlaps = 20
+  ) +
+  theme_minimal() +
+  xlab("Log2 Fold Change") +
+  ylab("-log10(adjusted p-value)") +
+  ggtitle("Volcano plot: NoInd vs lowWNT")
+
+# ---- NoInd vs highWNT ----
+ggplot() +
+  # All non-tubulin points
+  geom_point(
+    data = subset(res_noind_vs_high_df, !(gene %in% tubulin_genes)),
+    aes(x = log2FoldChange, y = -log10(padj), color = sig),
+    alpha = 0.5
+  ) +
+  scale_color_manual(values = c("no" = "grey", "yes" = "red")) +
+  # Tubulin points in black
+  geom_point(
+    data = subset(res_noind_vs_high_df, gene %in% tubulin_genes),
+    aes(x = log2FoldChange, y = -log10(padj)),
+    color = "black",
+    size = 2
+  ) +
+  # Labels for tubulin genes
+  geom_text_repel(
+    data = subset(res_noind_vs_high_df, gene %in% tubulin_genes),
+    aes(x = log2FoldChange, y = -log10(padj), label = gene),
+    size = 3,
+    box.padding = 0.3,
+    point.padding = 0.5,
+    max.overlaps = 20
+  ) +
+  theme_minimal() +
+  xlab("Log2 Fold Change") +
+  ylab("-log10(adjusted p-value)") +
+  ggtitle("Volcano plot: NoInd vs highWNT")
+
+
+
+
+
+
+
+metadata <- data.frame(
+  sample_id = colnames(count_matrix),
+  condition = col_data$condition
+)
+
+rownames(metadata) <- metadata$sample_id
+
+
+
+
+dds <- DESeqDataSetFromMatrix(
+  countData = count_matrix,
+  colData = metadata,
+  design = ~ condition
+)
+
+dds <- dds[rowSums(counts(dds)) > 10, ]
+dds <- DESeq(dds)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#| label: load-libs
+library(biomaRt)
+library(tidyverse)
+library(DESeq2)
+library(ggrepel)
+library(here)
+library(cowplot)
+library(rstatix)
+library(clusterProfiler)
+library(enrichplot)
+library(readr)
+library(dplyr)
+library(msigdbr)
+
+
+## Load libraries and generate gene information files (0 pts)
+# ----------------------------------------------------------
+# Generate gene annotation: transcript-to-gene and gene name map
+# ----------------------------------------------------------
+
+
+file_path <- "/Users/raileymikeska/Downloads/GSE175809_hiNCC_featureCounts.txt"
+
+
+mart <- biomaRt::useMart(
+  "ENSEMBL_MART_ENSEMBL",
+  dataset = "hsapiens_gene_ensembl"
+)
+
+# t2g: transcript → gene map (only needed for tximport)
+t2g <- biomaRt::getBM(
+  attributes = c(
+    "ensembl_transcript_id",
+    "ensembl_gene_id",
+    "external_gene_name"
+  ),
+  mart = mart
+) |> 
+  as_tibble()
+
+# Gene ID → gene symbol mapping (for DESeq2 results)
+gene_name_map <- t2g |>
+  dplyr::select(ensembl_gene_id, external_gene_name) |>
+  unique()
+
+
+
+
+
+## Q1 Perform differential expression analysis comparing NoInd vs LowWNT and NoInd vs HighWNT
+# ----------------------------------------------------------
+# Load your featureCounts table
+# ----------------------------------------------------------
+
+file_path <- "/Users/raileymikeska/Downloads/GSE175809_hiNCC_featureCounts.txt"
+
+counts_raw <- read.delim(file_path, comment.char = "#") |> 
+  as_tibble()
+
+# FeatureCounts puts annotation columns in the first 6 columns
+count_matrix <- counts_raw %>%
+  dplyr::select(-(1:6)) %>%           # remove annotation columns
+
+# Extract gene IDs
+gene_ids <- counts_raw$Geneid
+
+# Set rownames so DESeq2 can use them
+count_matrix <- as.data.frame(count_matrix)
+rownames(count_matrix) <- gene_ids
+
+# Clean column names
+colnames(count_matrix) <- colnames(count_matrix) %>%
+  str_replace("^\\.\\.\\.bam\\.", "") %>%  # remove leading ...bam.
+  str_replace("_hg38\\.bam$", "")          # remove _hg38.bam suffix
+
+colnames(count_matrix) 
+
+
+
+library(dplyr)
+library(stringr)
+library(tibble)
+
+sample_names <- colnames(count_matrix)
+
+metadata <- tibble(sample_id = colnames(count_matrix_sub)) %>%
+  mutate(
+    condition = case_when(
+      str_detect(sample_id, "NoInd") ~ "noind",
+      str_detect(sample_id, "lowWNT_TGFB") ~ "lowwnt_tgfb",
+      str_detect(sample_id, "highWNT_TGFB") ~ "highwnt_tgfb"
+    )
+  )
+
+rownames(metadata) <- metadata$sample_id
+metadata$condition <- factor(metadata$condition,
+                             levels = c("noind", "lowwnt_tgfb", "highwnt_tgfb"))
+
+
+library(dplyr)
+library(stringr)
+library(tibble)
+
+# Extract count columns
+count_matrix_sub <- counts_raw %>%
+  dplyr::select(-(1:6)) %>%           # drop annotation columns
+  as.data.frame()
+
+# Keep gene names from the Geneid column
+rownames(count_matrix_sub) <- counts_raw$Geneid
+
+# Clean column names
+colnames(count_matrix_sub) <- colnames(count_matrix_sub) %>%
+  str_replace("^\\.\\.\\.bam\\.", "") %>%
+  str_replace("_hg38\\.bam$", "")
+
+# Filter for samples we want
+keep_samples <- colnames(count_matrix_sub)[str_detect(colnames(count_matrix_sub),
+                                                      "NoInd|lowWNT_TGFB|highWNT_TGFB")]
+count_matrix_sub <- count_matrix_sub[, keep_samples]
+
+# Make rownames unique (optional)
+rownames(count_matrix_sub) <- make.unique(rownames(count_matrix_sub))
+
+# Filter low-count genes
+keepG <- rowSums(count_matrix_sub) > 10
+count_matrix_sub <- count_matrix_sub[keepG, ]
+
+
+
+
+
+
+
+
+library(DESeq2)
+
+dds <- DESeqDataSetFromMatrix(
+  countData = count_matrix_sub,
+  colData = metadata,
+  design = ~ condition
+)
+
+dds <- DESeq(dds)
+
+
+
+
+# NoInd vs lowWNT_TGFB
+diff_lowtgfb <- results(dds, contrast = c("condition", "lowwnt_tgfb", "noind")) %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  as_tibble()
+
+diff_hightgfb <- results(dds, contrast = c("condition", "highwnt_tgfb", "noind")) %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  as_tibble()
+
+
+
+
+
+library(tidyverse)
+library(ggrepel)
+library(cowplot)
+
+# Tubulin genes
+tubulin_genes_upper <- toupper(c(
+  "TUBB1", "TUBB2A", "TUBB2B", "TUBB3", "TUBB4", "TUBB5", "TUBB6",
+  "TUBA1A", "TUBA1B", "TUBA1C", "TUBA3A", "TUBA4A", "TUBA8"
+))
+
+# Prepare data
+diff_lowtgfb <- diff_lowtgfb %>%
+  mutate(
+    sig = case_when(
+      padj < 0.01 & log2FoldChange > 0 ~ "Upregulated",
+      padj < 0.01 & log2FoldChange < 0 ~ "Downregulated",
+      TRUE ~ "Not significant"
+    ),
+    gene_upper = toupper(gene)
+  )
+
+# Subset tubulin genes
+volcano_tubulin_low <- subset(diff_lowtgfb, gene_upper %in% tubulin_genes_upper)
+
+# Volcano plot
+ggplot(diff_lowtgfb, aes(x = log2FoldChange, y = -log10(padj), color = sig)) +
+  geom_point(alpha = 0.3, size = 1.5) +
+  
+  # Highlight tubulin genes with black outline and bigger points
+  geom_point(
+    data = volcano_tubulin_low,
+    aes(x = log2FoldChange, y = -log10(padj)),
+    shape = 21,
+    size = 4,
+    stroke = 1,
+    fill = "red",
+    color = "black"
+  ) +
+  
+  # Label tubulin genes
+  geom_text_repel(
+    data = volcano_tubulin_low,
+    aes(label = gene),
+    size = 4,
+    max.overlaps = 50,
+    color = "black"
+  ) +
+  
+  labs(
+    title = "Volcano Plot: NoInd vs LowWNT_TGFB",
+    x = "log2 Fold Change (TGFβ / No TGFβ)",
+    y = "-log10(FDR)",
+    color = "Regulation"
+  ) +
+  
+  scale_color_manual(
+    values = c("Upregulated" = "red", "Downregulated" = "blue", "Not significant" = "grey70")
+  ) +
+  
+  theme_cowplot() +
+  theme(legend.position = "top")
+
+
+
+
+# Prepare data
+diff_hightgfb <- diff_hightgfb %>%
+  mutate(
+    sig = case_when(
+      padj < 0.01 & log2FoldChange > 0 ~ "Upregulated",
+      padj < 0.01 & log2FoldChange < 0 ~ "Downregulated",
+      TRUE ~ "Not significant"
+    ),
+    gene_upper = toupper(gene)
+  )
+
+# Subset tubulin genes
+volcano_tubulin_high <- subset(diff_hightgfb, gene_upper %in% tubulin_genes_upper)
+
+# Volcano plot
+ggplot(diff_hightgfb, aes(x = log2FoldChange, y = -log10(padj), color = sig)) +
+  geom_point(alpha = 0.3, size = 1.5) +
+  
+  # Highlight tubulin genes with black outline and bigger points
+  geom_point(
+    data = volcano_tubulin_high,
+    aes(x = log2FoldChange, y = -log10(padj)),
+    shape = 21,
+    size = 4,
+    stroke = 1,
+    fill = "red",
+    color = "black"
+  ) +
+  
+  # Label tubulin genes
+  geom_text_repel(
+    data = volcano_tubulin_high,
+    aes(label = gene),
+    size = 4,
+    max.overlaps = 50,
+    color = "black"
+  ) +
+  
+  labs(
+    title = "Volcano Plot: NoInd vs HighWNT_TGFB",
+    x = "log2 Fold Change (TGFβ / No TGFβ)",
+    y = "-log10(FDR)",
+    color = "Regulation"
+  ) +
+  
+  scale_color_manual(
+    values = c("Upregulated" = "red", "Downregulated" = "blue", "Not significant" = "grey70")
+  ) +
+  
+  theme_cowplot() +
+  theme(legend.position = "top")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(tibble)
+library(dplyr)
+library(stringr)
+library(DESeq2)
+
+# --- Load counts ---
+file_path <- "/Users/raileymikeska/Downloads/GSE175809_hiNCC_featureCounts.txt"
+counts_raw <- read.delim(file_path, comment.char = "#") %>% as_tibble()
+gene_ids <- counts_raw$Geneid
+
+count_matrix <- counts_raw %>%
+  dplyr::select(-(1:6)) %>%
+  as.data.frame()
+rownames(count_matrix) <- gene_ids
+
+# Clean column names
+colnames(count_matrix) <- colnames(count_matrix) %>%
+  str_replace("^\\.\\.\\.bam\\.", "") %>%
+  str_replace("_hg38\\.bam$", "")
+
+# --- Create metadata ---
+metadata <- tibble(sample_id = colnames(count_matrix)) %>%
+  mutate(
+    condition = case_when(
+      sample_id %in% c("RNA_NoInd_1","RNA_NoInd_2") ~ "noind",
+      sample_id %in% c("RNA_lowWNT_TGFB_1","RNA_lowWNT_TGFB_2") ~ "lowwnt_tgfb",
+      sample_id %in% c("RNA_highWNT_TGFB_1","RNA_highWNT_TGFB_2") ~ "highwnt_tgfb",
+      TRUE ~ "other" # everything else ignored
+    )
+  ) %>%
+  filter(condition != "other") %>%        # keep only relevant samples
+  as.data.frame() %>%
+  column_to_rownames("sample_id")
+
+
+# --- Filter low-count genes ---
+keepG <- rowSums(count_matrix[ , rownames(metadata)]) > 10
+count_matrix_sub <- count_matrix[keepG, rownames(metadata)]
+
+# --- Make condition a factor ---
+metadata$condition <- factor(metadata$condition, levels = c("noind","lowwnt_tgfb","highwnt_tgfb"))
+
+
+# --- Run DESeq2 ---
+dds <- DESeqDataSetFromMatrix(
+  countData = count_matrix_sub,
+  colData   = metadata,
+  design    = ~ condition
+)
+dds <- DESeq(dds)
+
+# --- Get results ---
+diff_lowtgfb <- results(dds, contrast = c("condition","lowwnt_tgfb","noind")) %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  as_tibble()
+
+diff_hightgfb <- results(dds, contrast = c("condition","highwnt_tgfb","noind")) %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  as_tibble()
+
+
+# --- Tubulin genes ---
+tubulin_genes_upper <- toupper(c(
+  "TUBB1","TUBB2A","TUBB2B","TUBB3","TUBB4","TUBB5","TUBB6",
+  "TUBA1A","TUBA1B","TUBA1C","TUBA3A","TUBA4A","TUBA8"
+))
+
+# --- Volcano plot function ---
+plot_volcano <- function(diff_df, title) {
+  diff_df <- diff_df %>%
+    mutate(
+      sig = case_when(
+        padj < 0.01 & log2FoldChange > 0 ~ "Upregulated",
+        padj < 0.01 & log2FoldChange < 0 ~ "Downregulated",
+        TRUE ~ "Not significant"
+      ),
+      gene_upper = toupper(gene)
+    )
+  volcano_tubulin <- subset(diff_df, gene_upper %in% tubulin_genes_upper)
+  
+  ggplot(diff_df, aes(x = log2FoldChange, y = -log10(padj), color = sig)) +
+    geom_point(alpha = 0.3, size = 1.5) +
+    geom_point(data = volcano_tubulin, aes(x = log2FoldChange, y = -log10(padj)),
+               shape = 21, size = 4, stroke = 1, fill = "red", color = "black") +
+    geom_text_repel(data = volcano_tubulin, aes(label = gene),
+                    size = 4, max.overlaps = 50, color = "black") +
+    labs(title = title, x = "log2 Fold Change (TGFβ / No TGFβ)", y = "-log10(FDR)", color = "Regulation") +
+    scale_color_manual(values = c("Upregulated" = "red", "Downregulated" = "blue", "Not significant" = "grey70")) +
+    theme_cowplot() +
+    theme(legend.position = "top")
+}
+
+# --- Volcano plots ---
+volcano_low <- plot_volcano(diff_lowtgfb, "NoInd vs LowWNT + TGFβ")
+volcano_high <- plot_volcano(diff_hightgfb, "NoInd vs HighWNT + TGFβ")
+
+# Optional: plot side by side
+cowplot::plot_grid(volcano_low, volcano_high, ncol = 2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# High WNT samples
+keep_high <- rownames(metadata)[metadata$condition %in% c("highwnt", "highwnt_tgfb")]
+metadata_high <- metadata[keep_high, , drop = FALSE]
+count_matrix_high <- count_matrix[, keep_high]
+
+# Make sure factor levels are set correctly
+metadata_high$condition <- factor(metadata_high$condition, levels = c("highwnt", "highwnt_tgfb"))
+
+# Run DESeq2
+dds_high <- DESeqDataSetFromMatrix(
+  countData = count_matrix_high,
+  colData = metadata_high,
+  design = ~ condition
+)
+
+dds_high <- DESeq(dds_high)
+
+# Get results
+res_high <- results(dds_high, contrast = c("condition", "highwnt_tgfb", "highwnt")) %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  as_tibble()
+
+
+# Low WNT samples
+keep_low <- rownames(metadata)[metadata$condition %in% c("lowwnt", "lowwnt_tgfb")]
+metadata_low <- metadata[keep_low, , drop = FALSE]
+count_matrix_low <- count_matrix[, keep_low]
+
+# Factor levels
+metadata_low$condition <- factor(metadata_low$condition, levels = c("lowwnt", "lowwnt_tgfb"))
+
+# Run DESeq2
+dds_low <- DESeqDataSetFromMatrix(
+  countData = count_matrix_low,
+  colData = metadata_low,
+  design = ~ condition
+)
+
+dds_low <- DESeq(dds_low)
+
+# Get results
+res_low <- results(dds_low, contrast = c("condition", "lowwnt_tgfb", "lowwnt")) %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  as_tibble()
+
+library(tidyverse)
+library(ggrepel)
+library(cowplot)
+
+# --- Define tubulin genes ---
+tubulin_genes_upper <- toupper(c(
+  "TUBB1", "TUBB2A", "TUBB2B", "TUBB3", "TUBB4", "TUBB5", "TUBB6",
+  "TUBA1A", "TUBA1B", "TUBA1C", "TUBA3A", "TUBA4A", "TUBA8"
+))
+
+library(tidyverse)
+library(ggrepel)
+library(cowplot)
+library(DESeq2)
+
+# --- Define tubulin genes ---
+tubulin_genes_upper <- toupper(c(
+  "TUBB1", "TUBB2A", "TUBB2B", "TUBB3", "TUBB4", "TUBB5", "TUBB6",
+  "TUBA1A", "TUBA1B", "TUBA1C", "TUBA3A", "TUBA4A", "TUBA8"
+))
+
+# --- Get DESeq2 results ---
+
+# NoInd vs LowWNT_TGFB
+res_lowtgfb <- results(dds, contrast = c("condition", "lowwnt_tgfb", "noind")) %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  as_tibble()
+
+# NoInd vs HighWNT_TGFB
+res_hightgfb <- results(dds, contrast = c("condition", "highwnt_tgfb", "noind")) %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  as_tibble()
+
+# --- Volcano plot function ---
+plot_volcano <- function(diff_df, title) {
+  
+  diff_df <- diff_df %>%
+    mutate(
+      sig = case_when(
+        padj < 0.01 & log2FoldChange > 0 ~ "Upregulated",
+        padj < 0.01 & log2FoldChange < 0 ~ "Downregulated",
+        TRUE ~ "Not significant"
+      ),
+      gene_upper = toupper(gene)
+    )
+  
+  volcano_tubulin <- subset(diff_df, gene_upper %in% tubulin_genes_upper)
+  
+  ggplot(diff_df, aes(x = log2FoldChange, y = -log10(padj), color = sig)) +
+    geom_point(alpha = 0.3, size = 1.5) +
+    
+    # Highlight tubulin genes
+    geom_point(
+      data = volcano_tubulin,
+      aes(x = log2FoldChange, y = -log10(padj)),
+      shape = 21,
+      size = 4,
+      stroke = 1,
+      fill = "red",
+      color = "black"
+    ) +
+    
+    geom_text_repel(
+      data = volcano_tubulin,
+      aes(label = gene),
+      size = 4,
+      max.overlaps = 50,
+      color = "black"
+    ) +
+    
+    labs(
+      title = title,
+      x = "log2 Fold Change (TGFβ / No TGFβ)",
+      y = "-log10(FDR)",
+      color = "Regulation"
+    ) +
+    
+    scale_color_manual(
+      values = c("Upregulated" = "red", "Downregulated" = "blue", "Not significant" = "grey70")
+    ) +
+    
+    theme_cowplot() +
+    theme(legend.position = "top")
+}
+
+# --- Create volcano plots ---
+volcano_low <- plot_volcano(res_lowtgfb, "NoInd vs LowWNT + TGFβ")
+volcano_high <- plot_volcano(res_hightgfb, "NoInd vs HighWNT + TGFβ")
+
+# Optional: plot side by side
+cowplot::plot_grid(volcano_low, volcano_high, ncol = 2)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Install needed packages (if you don't have them)
+# install.packages(c("readxl", "ggplot2", "ggrepel", "dplyr"))
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+
+# ---- 1. Load data (TGF beta KO in neural crest cells) ----
+df <- read_xlsx("/Users/raileymikeska/Downloads/1-s2.0-S1534580725000590-mmc3.xlsx")
+
+# ---- 2. GO:0005874 microtubule cytoskeleton genes ----
+go_mt_genes_0005874 <- AnnotationDbi::select(
+  org.Hs.eg.db,
+  keys = "GO:0005874",
+  columns = c("SYMBOL", "GOALL"),
+  keytype = "GOALL"
+)
+mt_genes <- unique(toupper(go_mt_genes_0005874$SYMBOL))
+
+# ---- 3. Prepare data ----
+df <- df %>%
+  mutate(
+    PValue = as.numeric(PValue),
+    FDR = as.numeric(FDR),
+    neglog10P = -log10(PValue),
+    Symbol_upper = toupper(Symbol),
+    Significant = ifelse(FDR < 0.05 & abs(logFC) > 1, "Yes", "No"),
+    Microtubule = ifelse(Symbol_upper %in% mt_genes, "MT", "No")
+  )
+
+# Only MT genes that are significant
+df_mt_sig <- df %>% filter(Microtubule == "MT" & Significant == "Yes")
+
+# ---- 4. Volcano plot ----
+ggplot(df, aes(x = logFC, y = neglog10P)) +
+  
+  # Background points
+  geom_point(color = "grey", alpha = 0.6, size = 2) +
+  
+  # Significant MT genes on top
+  geom_point(data = df_mt_sig, aes(x = logFC, y = neglog10P), color = "black", size = 2.8) +
+  
+  # Cutoff lines
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  
+  # Labels for significant MT genes only
+  geom_text_repel(data = df_mt_sig, aes(label = Symbol), size = 4, color = "black", max.overlaps = Inf) +
+  
+  labs(
+    title = "Volcano Plot (Significant Microtubule Genes Labeled)",
+    x = "log2 Fold Change",
+    y = "-log10(P-value)"
+  ) +
+  theme_minimal()
+
